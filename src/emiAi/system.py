@@ -1,6 +1,67 @@
 import requests
 
 
+class _Message:
+
+    def __init__(self, system):
+        self.system = system
+        self._user_messages = set()
+
+    @property
+    def user(self):
+        return self._user_messages
+
+    @user.setter
+    def user(self, value):
+
+        if isinstance(value, str):
+            value = {value}
+
+        if not isinstance(value, (set, list, tuple)):
+            raise TypeError(
+                "emisystem.message.user must be "
+                "a set, list, tuple or string."
+            )
+
+        messages = set()
+
+        for message in value:
+
+            if not isinstance(message, str):
+                raise TypeError(
+                    "Every user message must be a string."
+                )
+
+            message = message.strip()
+
+            if message:
+                messages.add(message)
+
+        self._user_messages = messages
+
+
+class _Answer:
+
+    def __init__(self, system):
+        self.system = system
+
+    def message(self, answer):
+
+        if not isinstance(answer, str):
+            raise TypeError(
+                "emisystem.answer.message() "
+                "must receive a string."
+            )
+
+        self.system._answer_message = answer
+
+        # ساخت Rule برای پیام‌های فعلی
+        for user_message in self.system.message.user:
+            self.system._rules[user_message] = answer
+
+        return answer
+
+
 class _Data:
 
     def __init__(self, system):
@@ -39,7 +100,22 @@ class EmiSystem:
         self.model = None
         self.daily_limit = None
 
+        # Message system
+        self.message = _Message(self)
+        self.answer = _Answer(self)
+
+        # ذخیره Rule ها
+        self._rules = {}
+
+        # پاسخ آخرین Rule
+        self._answer_message = None
+
+        # Data system
         self.Data = _Data(self)
+
+    # ==========================================
+    # Model Setting
+    # ==========================================
 
     def setting(self, model):
 
@@ -47,18 +123,22 @@ class EmiSystem:
 
             self.model = model
 
-            # بررسی مدل قبل از استفاده
             try:
 
                 response = requests.post(
                     self.url,
+
                     headers={
                         "Authorization":
                             f"Bearer {self.api_key}",
 
                         "Content-Type":
+                            "application/json",
+
+                        "Accept":
                             "application/json"
                     },
+
                     json={
                         "model": self.model,
 
@@ -69,6 +149,7 @@ class EmiSystem:
                             }
                         ]
                     },
+
                     timeout=30
                 )
 
@@ -81,6 +162,7 @@ class EmiSystem:
                 if response.status_code == 400:
 
                     try:
+
                         data = response.json()
 
                         message = data.get(
@@ -109,7 +191,32 @@ class EmiSystem:
 
         return decorator
 
+    # ==========================================
+    # Chat
+    # ==========================================
+
     def chat(self, message):
+
+        if not isinstance(message, str):
+
+            raise TypeError(
+                "emisystem.chat() "
+                "message must be a string."
+            )
+
+        # ======================================
+        # بررسی Message Rules
+        # ======================================
+
+        user_message = message.strip()
+
+        if user_message in self._rules:
+
+            return self._rules[user_message]
+
+        # ======================================
+        # اگر Rule نبود → استفاده از AI
+        # ======================================
 
         if not self.model:
 
@@ -134,16 +241,12 @@ class EmiSystem:
             },
 
             json={
-                "model":
-                    self.model,
+                "model": self.model,
 
                 "messages": [
                     {
-                        "role":
-                            "user",
-
-                        "content":
-                            message
+                        "role": "user",
+                        "content": message
                     }
                 ]
             },
