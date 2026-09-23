@@ -1,12 +1,9 @@
+cat > src/emiAi/rubika/__init__.py <<'PY'
 from .bot import EmiAi
-from .decorators import message, button
+from .decorators import message
+from .buttons import button
 from .reply import reply
-from .buttons import Button
 from .keyboard import keyboard
-
-
-# سازنده دکمه
-button_builder = Button()
 
 
 __all__ = [
@@ -14,6 +11,6 @@ __all__ = [
     "message",
     "button",
     "reply",
-    "button_builder",
     "keyboard",
 ]
+PY
