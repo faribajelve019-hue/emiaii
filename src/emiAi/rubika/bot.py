@@ -17,28 +17,18 @@ class EmiAi:
     def __init__(
         self,
         token,
-        gateway="https://bot.hazardstudio.ir/api.php",
-        secret=None
+        gateway="https://bot.hazardstudio.ir/index.php"
     ):
-
         if not isinstance(token, str) or not token.strip():
             raise ValueError(
                 "Rubika bot token is required."
             )
 
         self.token = token.strip()
-
         self.gateway = gateway
-
-        self.secret = secret
-
         self.running = False
-
+        self.offset_id = None
         self.last_message_id = None
-
-    # ==================================================
-    # GATEWAY REQUEST
-    # ==================================================
 
     def request(self, action, **data):
 
@@ -49,50 +39,31 @@ class EmiAi:
 
         payload.update(data)
 
-        headers = {
-            "Content-Type": "application/json"
-        }
-
-        if self.secret:
-            headers["X-EmiAI-Secret"] = self.secret
-
         try:
-
             response = requests.post(
                 self.gateway,
                 json=payload,
-                headers=headers,
                 timeout=40
             )
-
         except requests.RequestException as e:
-
             raise RuntimeError(
-                f"emiAi Gateway connection error: {e}"
+                f"Gateway connection error: {e}"
             )
 
         try:
-
             result = response.json()
-
         except ValueError:
-
             raise RuntimeError(
-                "emiAi Gateway returned invalid JSON:\n"
+                "Gateway returned invalid JSON:\n"
                 + response.text[:2000]
             )
 
         if response.status_code >= 400:
-
             raise RuntimeError(
-                f"emiAi Gateway error:\n{result}"
+                f"Gateway HTTP error:\n{result}"
             )
 
         return result
-
-    # ==================================================
-    # SEND MESSAGE
-    # ==================================================
 
     def send_message(
         self,
@@ -120,192 +91,249 @@ class EmiAi:
             **data
         )
 
-    # ==================================================
-    # GET UPDATES
-    # ==================================================
-
     def get_updates(self):
 
+        data = {
+            "limit": 50
+        }
+
+        if self.offset_id is not None:
+            data["offset_id"] = self.offset_id
+
+        print(
+            "GET UPDATES | offset_id =",
+            self.offset_id
+        )
+
         return self.request(
-            "getUpdates"
+            "rubika",
+            method="getUpdates",
+            data=data
         )
 
-    # ==================================================
-    # USER INFO
-    # ==================================================
+    def extract_data(self, result):
 
-    def get_user_info(self, user_guid):
+        if not isinstance(result, dict):
+            return None
 
-        result = self.request(
-            "getUserInfo",
-            user_guid=user_guid
+        gateway_data = result.get("data")
+
+        if not isinstance(gateway_data, dict):
+            return None
+
+        rubika_data = gateway_data.get("data")
+
+        if not isinstance(rubika_data, dict):
+            return None
+
+        return rubika_data
+
+    def get_latest_message(self, updates):
+
+        if not isinstance(updates, list):
+            return None
+
+        messages = []
+
+        for update in updates:
+
+            if not isinstance(update, dict):
+                continue
+
+            if update.get("type") != "NewMessage":
+                continue
+
+            message = update.get("new_message")
+
+            if not isinstance(message, dict):
+                continue
+
+            chat_id = update.get("chat_id")
+
+            if not chat_id:
+                continue
+
+            messages.append(
+                (update, message)
+            )
+
+        if not messages:
+            return None
+
+        messages.sort(
+            key=lambda item: int(
+                item[0].get(
+                    "update_time",
+                    0
+                )
+            )
         )
 
-        return result
-
-    # ==================================================
-    # PROCESS UPDATE
-    # ==================================================
+        return messages[-1]
 
     def process_update(self, result):
 
-        if not isinstance(result, dict):
+        rubika_data = self.extract_data(result)
+
+        if rubika_data is None:
+            print("Invalid Rubika response")
             return
 
-        updates = result.get("data", result)
-
-        if isinstance(updates, dict):
-
-            if "update" in updates:
-                updates = [updates]
-
-            elif "inline_message" in updates:
-                updates = [updates]
-
-            else:
-                updates = [updates]
-
-        if not isinstance(updates, list):
-            return
-
-        for item in updates:
-
-            self._process_single_update(item)
-
-    # ==================================================
-    # SINGLE UPDATE
-    # ==================================================
-
-    def _process_single_update(self, update):
-
-        if not isinstance(update, dict):
-            return
-
-        # ----------------------------------------------
-        # NORMAL MESSAGE
-        # ----------------------------------------------
-
-        data = update.get("update")
-
-        if isinstance(data, dict):
-
-            update_type = data.get("type")
-
-            if update_type != "NewMessage":
-                return
-
-            chat_id = data.get("chat_id")
-
-            message = data.get(
-                "new_message",
-                {}
-            )
-
-            text = (
-                message.get("text")
-                or ""
-            ).strip()
-
-            sender_id = (
-                message.get("sender_id")
-                or ""
-            )
-
-            if not chat_id:
-                return
-
-            handlers = get_message_handlers()
-
-            handler = handlers.get(text)
-
-            if handler is None:
-                return
-
-            set_context(
-                self,
-                chat_id
-            )
-
-            try:
-
-                handler()
-
-            finally:
-
-                clear_context()
-
-            return
-
-        # ----------------------------------------------
-        # INLINE BUTTON
-        # ----------------------------------------------
-
-        inline = update.get(
-            "inline_message"
+        updates = rubika_data.get(
+            "updates",
+            []
         )
 
-        if isinstance(inline, dict):
+        next_offset = rubika_data.get(
+            "next_offset_id"
+        )
 
-            chat_id = inline.get(
-                "chat_id"
-            )
+        print(
+            "UPDATES:",
+            len(updates)
+        )
 
-            sender_id = inline.get(
-                "sender_id"
-            )
+        print(
+            "NEXT OFFSET:",
+            next_offset
+        )
 
-            aux_data = inline.get(
-                "aux_data",
-                {}
+        if next_offset:
+            self.offset_id = next_offset
+
+        if not updates:
+            return
+
+        latest = self.get_latest_message(
+            updates
+        )
+
+        if latest is None:
+            return
+
+        update, message = latest
+
+        chat_id = update.get("chat_id")
+
+        message_id = message.get(
+            "message_id"
+        )
+
+        text = (
+            message.get("text")
+            or ""
+        ).strip()
+
+        if (
+            message_id
+            and
+            message_id == self.last_message_id
+        ):
+            print(
+                "Duplicate message ignored:",
+                message_id
             )
+            return
+
+        if message_id:
+            self.last_message_id = message_id
+
+        aux_data = message.get(
+            "aux_data"
+        )
+
+        if isinstance(aux_data, dict):
 
             callback = aux_data.get(
                 "button_id"
             )
 
-            if not chat_id or not callback:
+            if callback:
+
+                print(
+                    "LATEST INLINE:",
+                    callback
+                )
+
+                handler = (
+                    get_button_handlers()
+                    .get(callback)
+                )
+
+                if handler is None:
+
+                    print(
+                        "No inline handler:",
+                        callback
+                    )
+
+                    return
+
+                set_context(
+                    self,
+                    chat_id
+                )
+
+                try:
+                    handler()
+                finally:
+                    clear_context()
+
                 return
 
-            handlers = get_button_handlers()
+        handler = (
+            get_message_handlers()
+            .get(text)
+        )
 
-            handler = handlers.get(callback)
+        if handler is None:
 
-            if handler is None:
-                return
-
-            set_context(
-                self,
-                chat_id
+            print(
+                "No message handler:",
+                repr(text)
             )
 
-            try:
+            return
 
-                handler()
+        print(
+            "LATEST MESSAGE:",
+            repr(text)
+        )
 
-            finally:
+        set_context(
+            self,
+            chat_id
+        )
 
-                clear_context()
-
-    # ==================================================
-    # RUN
-    # ==================================================
+        try:
+            handler()
+        finally:
+            clear_context()
 
     def run(self):
 
         self.running = True
 
         print(
-            "emiAi Rubika Bot started..."
+            "================================"
         )
-
+        print(
+            "emiAi Rubika Bot"
+        )
+        print(
+            "================================"
+        )
         print(
             "Gateway:",
             self.gateway
         )
-
         print(
-            "Waiting for messages..."
+            "Bot started."
         )
+        print(
+            "Waiting for latest updates..."
+        )
+        print()
 
         while self.running:
 
@@ -317,28 +345,24 @@ class EmiAi:
                     result
                 )
 
-                time.sleep(2)
+                time.sleep(1)
 
             except KeyboardInterrupt:
 
                 self.running = False
 
                 print(
-                    "\nemiAi Rubika Bot stopped."
+                    "\nBot stopped."
                 )
 
             except Exception as e:
 
                 print(
                     "emiAi Error:",
-                    e
+                    repr(e)
                 )
 
                 time.sleep(5)
-
-    # ==================================================
-    # STOP
-    # ==================================================
 
     def stop(self):
 
