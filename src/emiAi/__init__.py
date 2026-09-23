@@ -1,4 +1,4 @@
-kfrom .client import EmiAI
+from .client import EmiAI
 from .system import EmiSystem
 
 from .rubika import (

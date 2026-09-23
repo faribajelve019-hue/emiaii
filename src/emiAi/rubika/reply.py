@@ -31,24 +31,67 @@ class Reply:
                 "reply.message() can only be used inside a message handler."
             )
 
-        inline_keypad = None
+        inline_buttons = []
         chat_keypad = None
 
         for component in components:
 
-            if hasattr(component, "to_inline_dict"):
-                inline_keypad = component.to_inline_dict()
+            # -----------------------------
+            # INLINE
+            # -----------------------------
 
-            elif hasattr(component, "to_dict"):
+            if hasattr(
+                component,
+                "to_inline_dict"
+            ):
+
+                data = component.to_inline_dict()
+
+                rows = data.get(
+                    "rows",
+                    []
+                )
+
+                for row in rows:
+
+                    buttons = row.get(
+                        "buttons",
+                        []
+                    )
+
+                    inline_buttons.extend(
+                        buttons
+                    )
+
+            # -----------------------------
+            # CHAT KEYBOARD
+            # -----------------------------
+
+            elif hasattr(
+                component,
+                "to_dict"
+            ):
 
                 data = component.to_dict()
 
-                if "rows" in data:
+                if (
+                    "resize_keyboard"
+                    in data
+                ):
 
-                    if "resize_keyboard" in data:
-                        chat_keypad = data
-                    else:
-                        inline_keypad = data
+                    chat_keypad = data
+
+        inline_keypad = None
+
+        if inline_buttons:
+
+            inline_keypad = {
+                "rows": [
+                    {
+                        "buttons": inline_buttons
+                    }
+                ]
+            }
 
         return _current_bot.send_message(
             _current_chat_id,

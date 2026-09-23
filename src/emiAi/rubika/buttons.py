@@ -1,3 +1,6 @@
+from .decorators import button as button_decorator
+
+
 class InlineButton:
 
     def __init__(self, text, callback):
@@ -14,17 +17,18 @@ class InlineButton:
 
 class InlineKeyboard:
 
-    def __init__(self, buttons):
-        self.buttons = buttons
+    def __init__(self, text, callback):
+        self.button = InlineButton(
+            text,
+            callback
+        )
 
     def to_inline_dict(self):
-
         return {
             "rows": [
                 {
                     "buttons": [
-                        button.to_dict()
-                        for button in self.buttons
+                        self.button.to_dict()
                     ]
                 }
             ]
@@ -33,11 +37,14 @@ class InlineKeyboard:
 
 class Button:
 
-    @staticmethod
-    def inline(text, callback):
-        return InlineKeyboard([
-            InlineButton(text, callback)
-        ])
+    def __call__(self, callback):
+        return button_decorator(callback)
+
+    def inline(self, text, callback):
+        return InlineKeyboard(
+            text,
+            callback
+        )
 
 
 button = Button()
