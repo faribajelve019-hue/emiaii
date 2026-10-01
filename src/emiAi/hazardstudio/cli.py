@@ -1,4 +1,3 @@
-import getpass
 import json
 import os
 import re
@@ -50,6 +49,49 @@ def request_json(path, data):
         }
 
 
+def read_password(prompt="Enter password: "):
+    import sys
+    import termios
+    import tty
+
+    print(prompt, end="", flush=True)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    password = ""
+
+    try:
+        tty.setcbreak(fd)
+
+        while True:
+            char = sys.stdin.read(1)
+
+            # Enter
+            if char in ("\n", "\r"):
+                print()
+                break
+
+            # Backspace
+            if char in ("\x7f", "\x08"):
+                if password:
+                    password = password[:-1]
+                    print("\b \b", end="", flush=True)
+                continue
+
+            # Ctrl+C
+            if char == "\x03":
+                print()
+                raise KeyboardInterrupt
+
+            password += char
+            print("*", end="", flush=True)
+
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    return password
+
+
 def save_config(api_key, username):
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
 
@@ -92,7 +134,7 @@ def login():
         print("❌ Username cannot be empty.")
         return
 
-    password = getpass.getpass("Enter password: ")
+    password = read_password("Enter password: ")
 
     if len(password) < 6:
         print("❌ Password must be at least 6 characters.")
