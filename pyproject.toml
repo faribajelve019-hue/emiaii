@@ -17,3 +17,6 @@ where = ["src"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+[project.scripts]
+hazardstudio = "emiAi.hazardstudio.cli:main"
+hca = "emiAi.hca.interpreter:run_hca"
