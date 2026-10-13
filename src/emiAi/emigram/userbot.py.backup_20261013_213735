@@ -1,0 +1,167 @@
+import os
+import time
+import requests
+
+
+class Emigram:
+    """
+    EmiGram UserBot SDK.
+
+    Authentication uses a revocable API token.
+    The corresponding server endpoints must be enabled.
+    """
+
+    def __init__(
+        self,
+        token=None,
+        base_url="https://hazardstudio.ir/Emigram/",
+        poll_interval=3,
+    ):
+        self.token = (
+            token or os.getenv("EMIGRAM_BOT_TOKEN", "")
+        ).strip()
+
+        if not self.token:
+            raise ValueError(
+                "Set EMIGRAM_BOT_TOKEN or pass a bot token."
+            )
+
+        self.base_url = base_url.rstrip("/") + "/"
+        self.poll_interval = max(1, int(poll_interval))
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "EmiAi-Emigram-UserBot/0.5.0",
+        })
+
+    def _request(self, action, data=None):
+        try:
+            response = self.session.post(
+                self.base_url,
+                params={"api": action},
+                json=data or {},
+                timeout=20,
+            )
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"EmiGram connection failed: {exc}"
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError(
+                "EmiGram returned invalid JSON."
+            ) from exc
+
+        if not isinstance(result, dict) or not result.get("ok"):
+            message = (
+                result.get("message", "Request failed.")
+                if isinstance(result, dict)
+                else "Unexpected server response."
+            )
+            raise RuntimeError(f"EmiGram API: {message}")
+
+        return result
+
+    def _matches(self, text, rules):
+        text = text.casefold()
+
+        for trigger, answer in rules:
+            if trigger.casefold() in text:
+                return answer
+
+        return None
+
+    def run(self, bot_message):
+        if not isinstance(bot_message, dict):
+            raise TypeError("bot_message must be a dictionary.")
+
+        rules = []
+
+        for key, value in bot_message.items():
+            if not key.startswith("response."):
+                continue
+
+            trigger_key = key[len("response."):]
+            trigger = bot_message.get(trigger_key)
+
+            if not isinstance(trigger, str) or not trigger.strip():
+                raise ValueError(
+                    f"Missing trigger text for {key!r}."
+                )
+
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"Response {key!r} must be non-empty text."
+                )
+
+            rules.append((trigger.strip(), value.strip()))
+
+        if not rules:
+            raise ValueError(
+                "Add trigger/response pairs to bot_message."
+            )
+
+        cursor = 0
+        replied_to = set()
+
+        print("EmiGram UserBot started.")
+        print("Stop with Ctrl+C.")
+
+        try:
+            while True:
+                result = self._request(
+                    "bot_updates",
+                    {"after": cursor},
+                )
+
+                messages = result.get("messages", [])
+
+                if not isinstance(messages, list):
+                    raise RuntimeError(
+                        "Invalid messages list from EmiGram."
+                    )
+
+                for message in messages:
+                    if not isinstance(message, dict):
+                        continue
+
+                    try:
+                        message_id = int(message["id"])
+                        sender_id = int(message["sender_id"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+
+                    cursor = max(cursor, message_id)
+
+                    if message_id in replied_to:
+                        continue
+
+                    text = str(message.get("body", "")).strip()
+                    answer = self._matches(text, rules)
+
+                    if not answer:
+                        continue
+
+                    # The server must validate token ownership,
+                    # recipient access, and rate limits.
+                    self._request(
+                        "bot_send",
+                        {
+                            "receiver_id": sender_id,
+                            "body": answer,
+                            "reply_to": message_id,
+                        },
+                    )
+
+                    replied_to.add(message_id)
+                    print(f"Replied to message {message_id}")
+
+                time.sleep(self.poll_interval)
+
+        except KeyboardInterrupt:
+            print("\nEmiGram UserBot stopped.")
+        finally:
+            self.session.close()
