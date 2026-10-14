@@ -13,7 +13,7 @@ from typing import Mapping
 import requests
 
 
-DEFAULT_BASE_URL = "https://hazardstudio.ir/Emigram/"
+DEFAULT_BASE_URL = "https://emigram.ir/web-acconts/"
 
 
 class Emigram:
